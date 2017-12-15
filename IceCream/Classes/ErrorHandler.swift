@@ -206,7 +206,7 @@ public struct ErrorHandler {
             returnMessage = "Unhandled Error."
         }
         
-        return returnMessage + "CKError.Code: \(code.rawValue)"
+        return returnMessage + " CKError.Code: \(code.rawValue)"
     }
     
 }

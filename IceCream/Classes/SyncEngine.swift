@@ -247,19 +247,23 @@ extension SyncEngine {
                 // Fetch the changes in zone level
                 `self`.fetchChangesInZone(callback)
             case .retry(let timeToWait, _):
+                print("Error: SyncEngine.fetchChangesInDatabase")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
                     `self`.fetchChangesInDatabase(callback)
                 })
             case .recoverableError(let reason, _):
+                print("Error: SyncEngine.fetchChangesInDatabase")
                 switch reason {
                 case .changeTokenExpired:
                     /// The previousServerChangeToken value is too old and the client must re-sync from scratch
                     `self`.databaseChangeToken = nil
                     `self`.fetchChangesInDatabase(callback)
                 default:
+                    print("Error: SyncEngine.fetchChangesInDatabase")
                     return
                 }
             default:
+                    
                 return
             }
         }
@@ -329,10 +333,12 @@ extension SyncEngine {
                 callback?()
                 print("Sync successfully!")
             case .retry(let timeToWait, _):
+                print("Error: SyncEngine.fetchChangesInZone")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
                     `self`.fetchChangesInZone(callback)
                 })
             case .recoverableError(let reason, _):
+                print("Error: SyncEngine.fetchChangesInZone")
                 switch reason {
                 case .changeTokenExpired:
                     /// The previousServerChangeToken value is too old and the client must re-sync from scratch
@@ -342,6 +348,7 @@ extension SyncEngine {
                     return
                 }
             default:
+                print("Error: SyncEngine.fetchChangesInZone")
                 return
             }
         }
@@ -363,10 +370,12 @@ extension SyncEngine {
                     completion?(nil)
                 }
             case .retry(let timeToWait, _):
+                print("Error: SyncEngine.createCustomZone")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
                      `self`.createCustomZone(completion)
                 })
             default:
+                print("Error: SyncEngine.createCustomZone")
                 return
             }
         }
@@ -427,10 +436,12 @@ extension SyncEngine {
                 print("Register remote successfully!")
                 `self`.subscriptionIsLocallyCached = true
             case .retry(let timeToWait, _):
+                print("Error: SyncEngine.createDatabaseSubscription")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
                     `self`.createDatabaseSubscription()
                 })
             default:
+                print("Error: SyncEngine.createDatabaseSubscription")
                 return
             }
         }
@@ -480,14 +491,17 @@ extension SyncEngine {
                     /// Cause we will get a error when there is very empty in the cloudKit dashboard
                     /// which often happen when users first launch your app.
                     /// So, we put the subscription process here when we sure there is a record type in CloudKit.
-                    if `self`.subscriptionIsLocallyCached { return }
-                    `self`.createDatabaseSubscription()
+                    if !(`self`.subscriptionIsLocallyCached) {
+                        `self`.createDatabaseSubscription()
+                    }
                 }
             case .retry(let timeToWait, _):
+                print("Error: SyncEngine.syncRecordsToCloudKit")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait) {
                     `self`.syncRecordsToCloudKit(recordsToStore: recordsToStore, recordIDsToDelete: recordIDsToDelete, completion: completion)
                 }
             case .chunk:
+                print("Error: SyncEngine.syncRecordsToCloudKit")
                 /// CloudKit says maximum number of items in a single request is 400.
                 /// So I think 300 should be a fine by them.
                 let chunkedRecords = recordsToStore.chunkItUp(by: 300)
@@ -495,6 +509,7 @@ extension SyncEngine {
                     `self`.syncRecordsToCloudKit(recordsToStore: chunk, recordIDsToDelete: recordIDsToDelete, completion: completion)
                 }
             default:
+                print("Error: SyncEngine.syncRecordsToCloudKit")
                 return
             }
         }
@@ -518,6 +533,8 @@ extension SyncEngine {
             guard let ids = opeIDs else { return }
             for id in ids {
                 CKContainer.default().fetchLongLivedOperation(withID: id, completionHandler: { (ope, error) in
+                    
+                    
                     guard error == nil else { return }
                     if let modifyOp = ope as? CKModifyRecordsOperation {
                         modifyOp.modifyRecordsCompletionBlock = { (_,_,_) in
