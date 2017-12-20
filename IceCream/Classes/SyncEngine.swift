@@ -42,7 +42,7 @@ public final class SyncEngine<T: Object & CKRecordConvertible & CKRecordRecovera
     /// For more, reference is here: https://realm.io/docs/swift/latest/#notifications
     private var notificationToken: NotificationToken?
     
-//    fileprivate var changedRecordZoneID: CKRecordZoneID?
+    //    fileprivate var changedRecordZoneID: CKRecordZoneID?
     
     /// Indicates the private database in default container
     private let privateDatabase = CKContainer.default().privateCloudDatabase
@@ -64,7 +64,11 @@ public final class SyncEngine<T: Object & CKRecordConvertible & CKRecordRecovera
                     print("First sync done!")
                 })
                 
-                `self`.resumeLongLivedOperationIfPossible()
+                `self`.checkAndExecuteLongLivedOperations()
+        
+                if !(`self`.subscriptionIsLocallyCached) {
+                    `self`.createDatabaseSubscription()
+                }
                 
                 if (!`self`.isCustomZoneCreated) {
                     `self`.createCustomZone()
@@ -143,7 +147,7 @@ extension SyncEngine {
         
         self.syncRecordsToCloudKit(recordsToStore: recordsToStore, recordIDsToDelete: recordIDsToDelete)
     }
-
+    
 }
 
 /// Chat to the CloudKit API directly
@@ -240,7 +244,7 @@ extension SyncEngine {
         changesOperation.fetchDatabaseChangesCompletionBlock = {
             [weak self]
             newToken, _, error in
-             guard let `self` = self else { return }
+            guard let `self` = self else { return }
             switch `self`.errorHandler.resultType(with: error) {
             case .success:
                 `self`.databaseChangeToken = newToken
@@ -263,7 +267,7 @@ extension SyncEngine {
                     return
                 }
             default:
-                    
+                
                 return
             }
         }
@@ -279,10 +283,14 @@ extension SyncEngine {
         changesOp.fetchAllChanges = true
         
         changesOp.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
+            print("updated Token")
             self.zoneChangesToken = token
         }
         
-        changesOp.recordChangedBlock = { [weak self]record in
+        changesOp.recordChangedBlock = {
+            [weak self]
+            record in
+            print("changedRec Change: \(record.recordID.recordName), zone: \(record.recordID.zoneID.zoneName)")
             /// The Cloud will return the modified record since the last zoneChangesToken, we need to do local cache here.
             /// Handle the record:
             guard let `self` = self else { return }
@@ -290,10 +298,10 @@ extension SyncEngine {
                 print("There is something wrong with the converson from cloud record to local object")
                 return
             }
-
+            
             DispatchQueue.main.async {
                 let realm = try! Realm()
-
+                
                 /// If your model class includes a primary key, you can have Realm intelligently update or add objects based off of their primary key values using Realm().add(_:update:).
                 /// https://realm.io/docs/swift/latest/#objects-with-primary-keys
                 realm.beginWrite()
@@ -306,7 +314,10 @@ extension SyncEngine {
             }
         }
         
-        changesOp.recordWithIDWasDeletedBlock = { [weak self]recordId, _ in
+        changesOp.recordWithIDWasDeletedBlock = {
+            [weak self]
+            (recordId, _) in
+            print("deletedRec Change: \(recordId.recordName), zone: \(recordId.zoneID.zoneName)")
             guard let `self` = self else { return }
             
             DispatchQueue.main.async {
@@ -331,7 +342,7 @@ extension SyncEngine {
             case .success:
                 `self`.zoneChangesToken = token
                 callback?()
-                print("Sync successfully!")
+                print("Sync successful!")
             case .retry(let timeToWait, _):
                 print("Error: SyncEngine.fetchChangesInZone")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
@@ -355,7 +366,7 @@ extension SyncEngine {
         
         privateDatabase.add(changesOp)
     }
- 
+    
     
     /// Create new custom zones
     /// You can(but you shouldn't) invoke this method more times, but the CloudKit is smart and will handle that for you
@@ -372,7 +383,7 @@ extension SyncEngine {
             case .retry(let timeToWait, _):
                 print("Error: SyncEngine.createCustomZone")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
-                     `self`.createCustomZone(completion)
+                    `self`.createCustomZone(completion)
                 })
             default:
                 print("Error: SyncEngine.createCustomZone")
@@ -519,23 +530,57 @@ extension SyncEngine {
     /// 2. App exits or ejected by user
     /// 3. Back to app again
     /// The operation resumes! All works like a magic!
-    fileprivate func resumeLongLivedOperationIfPossible () {
-        CKContainer.default().fetchAllLongLivedOperationIDs { ( opeIDs, error) in
-            guard error == nil else { return }
-            guard let ids = opeIDs else { return }
-            for id in ids {
-                CKContainer.default().fetchLongLivedOperation(withID: id, completionHandler: { (ope, error) in
-                    
-                    
-                    guard error == nil else { return }
-                    if let modifyOp = ope as? CKModifyRecordsOperation {
-                        modifyOp.modifyRecordsCompletionBlock = { (_,_,_) in
-                            print("Resume modify records success!")
-                        }
-                        CKContainer.default().add(modifyOp)
-                    }
-                })
+    fileprivate func checkAndExecuteLongLivedOperations() {
+        CKContainer.default().fetchAllLongLivedOperationIDs {
+            [weak self]
+            (opeIDs, error) in
+            
+            guard let `self` = self else { return }
+            
+            switch `self`.errorHandler.resultType(with: error) {
+            case .success:
+                guard let ids = opeIDs else { return }
+                `self`.resumeLongLivedOperationIfPossible(ids)
+            case .retry(let timeToWait, _):
+                print("Error: SyncEngine.checkForLongLivedOperations")
+                `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait) {
+                    `self`.checkAndExecuteLongLivedOperations()
+                }
+            default:
+                print("Error: SyncEngine.checkForLongLivedOperations")
+                return
             }
+        }
+    }
+    
+    fileprivate func resumeLongLivedOperationIfPossible(_ ids: [String]) {
+        for id in ids {
+            CKContainer.default().fetchLongLivedOperation(withID: id, completionHandler: {
+                [weak self]
+                (ope, error) in
+                
+                guard let `self` = self else { return }
+                
+                switch `self`.errorHandler.resultType(with: error) {
+                case .success:
+                    DispatchQueue.main.async {
+                        if let modifyOp = ope as? CKModifyRecordsOperation {
+                            modifyOp.modifyRecordsCompletionBlock = { (_,_,_) in
+                                print("Resume modify records success!")
+                            }
+                            CKContainer.default().add(modifyOp)
+                        }
+                    }
+                case .retry(let timeToWait, _):
+                    print("Error: SyncEngine.resumeLongLivedOperationIfPossible")
+                    `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait) {
+                        `self`.resumeLongLivedOperationIfPossible(ids)
+                    }
+                default:
+                    print("Error: SyncEngine.resumeLongLivedOperationIfPossible")
+                    return
+                }
+            })
         }
     }
 }
