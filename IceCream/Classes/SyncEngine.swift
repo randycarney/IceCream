@@ -88,7 +88,7 @@ public final class SyncEngine<T: Object & CKRecordConvertible & CKRecordRecovera
     
     /// When you commit a write transaction to a Realm, all other instances of that Realm will be notified, and be updated automatically.
     /// For more: https://realm.io/docs/swift/latest/#writes
-
+    
     private func registerLocalDatabase() {
         let objects = Cream<T>().realm.objects(T.self)
         notificationToken = objects.observe({ [weak self](changes) in
@@ -382,7 +382,7 @@ extension SyncEngine {
         
         privateDatabase.add(modifyOp)
     }
- 
+    
     /// Check if custom zone already exists
   /* fileprivate func checkCustomZoneExists(_ completion: ((Error?) -> ())? = nil) {
         let checkZoneOp = CKFetchRecordZonesOperation(recordZoneIDs: [customZoneID])
@@ -405,36 +405,24 @@ extension SyncEngine {
 */
     
     fileprivate func createDatabaseSubscription() {
-        // The direct below is the subscribe way that Apple suggests in CloudKit Best Practices(https://developer.apple.com/videos/play/wwdc2016/231/) , but it doesn't work here in my place.
-        /*
-        let subscription = CKDatabaseSubscription(subscriptionID: IceCreamConstants.cloudSubscriptionID)
-
+        
+        let subscription = CKDatabaseSubscription(subscriptionID: IceCreamConstant.cloudKitSubscriptionID)
+        
         let notificationInfo = CKNotificationInfo()
         notificationInfo.shouldSendContentAvailable = true // Silent Push
-         
+        
         subscription.notificationInfo = notificationInfo
-
+        
         let createOp = CKModifySubscriptionsOperation(subscriptionsToSave: [subscription], subscriptionIDsToDelete: [])
-        createOp.modifySubscriptionsCompletionBlock = { _, _, error in
-            guard error == nil else { return }
-            self.subscriptionIsLocallyCached = true
-        }
-        createOp.qualityOfService = .utility
-        privateDatabase.add(createOp)
-         */
         
-        /// So I use the @Guilherme Rambo's plan: https://github.com/insidegui/NoteTaker
-        let subscription = CKQuerySubscription(recordType: T.recordType, predicate: NSPredicate(value: true), subscriptionID: IceCreamConstant.cloudKitSubscriptionID, options: [.firesOnRecordCreation, .firesOnRecordUpdate, .firesOnRecordDeletion])
-        let notificationInfo = CKNotificationInfo()
-        notificationInfo.shouldSendContentAvailable = true // Silent Push
-        subscription.notificationInfo = notificationInfo
-        
-        privateDatabase.save(subscription) { [weak self](_, error) in
+        createOp.modifySubscriptionsCompletionBlock = {
+            [weak self]
+            _, _, error in
             guard let `self` = self else { return }
             switch `self`.errorHandler.resultType(with: error) {
             case .success:
-                print("Register remote successfully!")
                 `self`.subscriptionIsLocallyCached = true
+                print("Register remote successfully: \(`self`.subscriptionIsLocallyCached)")
             case .retry(let timeToWait, _):
                 print("Error: SyncEngine.createDatabaseSubscription")
                 `self`.errorHandler.retryOperationIfPossible(retryAfter: timeToWait, block: {
@@ -445,6 +433,10 @@ extension SyncEngine {
                 return
             }
         }
+        
+        createOp.qualityOfService = .userInitiated
+        
+        privateDatabase.add(createOp)
     }
     
     fileprivate func startObservingRemoteChanges() {
